@@ -18,7 +18,7 @@ to your account, and manage DNS records — all from one place.
 
 - [Next.js 16](https://nextjs.org) (App Router) + React 19 + TypeScript
 - [Tailwind CSS v4](https://tailwindcss.com)
-- [Prisma 7](https://www.prisma.io) with a SQLite driver adapter (`better-sqlite3`)
+- [Prisma 7](https://www.prisma.io) with the PostgreSQL driver adapter (`pg`)
 - [jose](https://github.com/panva/jose) for session JWTs, `bcryptjs` for hashing,
   `zod` for input validation
 
@@ -30,9 +30,10 @@ npm install
 
 # 2. Configure environment
 cp .env.example .env
-#   then edit .env — see "Configuration" below
+#   then edit .env — set DATABASE_URL to a Postgres database and fill in the
+#   name.com credentials. See "Configuration" below.
 
-# 3. Create the SQLite database from the Prisma schema
+# 3. Create the tables from the Prisma schema
 npx prisma db push
 
 # 4. Run the dev server
@@ -41,13 +42,16 @@ npm run dev
 
 Open <http://localhost:3000>.
 
+> Need a local Postgres quickly? `docker run --name domainrr-db -e POSTGRES_PASSWORD=password -e POSTGRES_DB=domainrr -p 5432:5432 -d postgres:16`
+> then use `DATABASE_URL="postgresql://postgres:password@localhost:5432/domainrr?schema=public"`.
+
 ## Configuration
 
 All configuration lives in `.env` (see `.env.example`):
 
 | Variable          | Description                                                                 |
 | ----------------- | --------------------------------------------------------------------------- |
-| `DATABASE_URL`    | SQLite connection string, e.g. `file:./dev.db`.                             |
+| `DATABASE_URL`    | PostgreSQL connection string. Use a **pooled** URL on serverless hosts.     |
 | `AUTH_SECRET`     | Secret used to sign session JWTs. Generate with `openssl rand -base64 32`.  |
 | `NAMECOM_API_URL` | `https://api.dev.name.com` (sandbox) or `https://api.name.com` (production). |
 | `NAMECOM_USERNAME`| Your name.com username. In the **dev** environment append `-test`.           |
@@ -87,6 +91,26 @@ src/
   name.com's `POST /v4/domains` with registrant contacts and a purchase price —
   that billing/contact flow is intentionally left as the next milestone (see the
   note in `src/app/api/domains/route.ts`).
-- **Production database.** SQLite is great for local dev. For production, switch
-  the `datasource` provider in `prisma/schema.prisma` (and the adapter in
-  `src/lib/prisma.ts`) to Postgres.
+- **DNS-only registrar coupling.** DNS records live at name.com; the local
+  database only tracks which user owns which domain so it can gate management.
+
+## Deploying to Vercel
+
+1. **Create a Postgres database** — in Vercel: **Storage → Create Database →
+   Postgres** (Neon-backed), or use [Neon](https://neon.tech) /
+   [Supabase](https://supabase.com). Copy the **pooled** connection string (the
+   host contains `-pooler`).
+2. **Import the repo** at [vercel.com/new](https://vercel.com/new). Next.js is
+   auto-detected; defaults are fine. The `build` and `postinstall` scripts already
+   run `prisma generate` for you.
+3. **Set environment variables** (Production + Preview) — `DATABASE_URL`,
+   `AUTH_SECRET` (`openssl rand -base64 32`), `NAMECOM_API_URL`,
+   `NAMECOM_USERNAME`, `NAMECOM_TOKEN`. If you used Vercel Postgres, `DATABASE_URL`
+   is injected automatically.
+4. **Create the tables** once against the production database:
+   ```bash
+   DATABASE_URL="<your-prod-postgres-url>" npx prisma db push
+   ```
+   For a migration-based workflow later, use `prisma migrate dev` locally and add
+   `prisma migrate deploy` to the build command.
+5. **Deploy**, then register an account and run a search to verify.
